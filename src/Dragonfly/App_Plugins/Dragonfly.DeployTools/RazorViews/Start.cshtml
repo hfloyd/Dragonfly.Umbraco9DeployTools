@@ -1,0 +1,113 @@
+@using Dragonfly.NetHelpers
+@using Dragonfly.Umbraco9DeployTools.Models;
+
+@model List<Workspace>
+
+@{
+
+	var workspaces = Model;
+	var actions = new Dictionary<string, string>()
+	{
+		{ "Fetch All Remote Nodes Data (Last run)", "/umbraco/backoffice/Dragonfly/DeployTools/FetchAllRemoteNodesData?UpdateRemoteFirst=false&EnvironmentType=" },
+		{ "Fetch All Remote Nodes Data (Most current)", "/umbraco/backoffice/Dragonfly/DeployTools/FetchAllRemoteNodesData?UpdateRemoteFirst=true&EnvironmentType=" },
+		{ "Compare Local to Remote", "/umbraco/backoffice/Dragonfly/DeployTools/CompareContent?EnvironmentType=" }
+	};
+
+}
+
+<!DOCTYPE html>
+<html>
+<head>
+	<link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" />
+	<link href="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/css/dataTables.bootstrap.min.css" rel="stylesheet" />
+
+	@*<style>
+		{
+
+		}
+		</style>*@
+	@*<!--<script src="/scripts/snippet-javascript-console.min.js?v=1"></script>-->*@
+</head>
+<body>
+	<div class="container-full" style="margin: 0 10px;">
+
+		<h1>Dragonfly Deploy Tools</h1>
+
+		<h5>Current Environment</h5>
+		<a href="/umbraco/backoffice/Dragonfly/DeployTools/UpdateAllLocalNodesData">Update All Local Nodes Data</a>
+
+		<h5>Remote Environments</h5>
+		<table id="umbracodata_Environments" class="table table-striped table-bordered table-hover table-sm" cellspacing="0" style="width:100%">
+			<thead>
+				<tr>
+					<th>&nbsp;</th>
+					@foreach (var env in workspaces)
+					{
+						<th>@env.Name</th>
+					}
+				</tr>
+			</thead>
+			<tbody>
+
+				@foreach (var action in actions)
+				{
+					var actionUrl = action.Value;
+					<tr>
+						<td>@action.Key</td>
+
+						@foreach (var env in workspaces)
+						{
+							var url = $"{actionUrl}{env.Type}";
+							<td>@url</td>
+						}
+					</tr>
+				}
+			</tbody>
+		</table>
+
+
+	</div>
+
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/js/jquery.dataTables.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/js/dataTables.bootstrap.min.js"></script>
+
+</body>
+</html>
+
+@functions {
+
+
+	private void RenderTableScripts(string TableId)
+	{
+		<script type="text/javascript">
+			$(document).ready(function () {
+				// Setup - add a text input to each footer cell
+				$('#@TableId tfoot th').each( function () {
+					var title = $(this).text();
+					$(this).html( '<input type="text" style="font-size:10px; width:100%;" placeholder="Search '+title+'" />' );
+				} );
+
+				// DataTable
+				$('#@TableId').DataTable({
+					initComplete: function () {
+						// Apply the search
+						this.api().columns().every( function () {
+							var that = this;
+
+							$( 'input', this.footer() ).on( 'keyup change clear', function () {
+								if ( that.search() !== this.value ) {
+									that
+										.search( this.value )
+										.draw();
+								}
+							} );
+						} );
+					}
+				});
+
+			});
+		</script>
+	}
+
+}

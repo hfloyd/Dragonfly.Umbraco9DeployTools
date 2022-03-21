@@ -1,0 +1,22 @@
+@using Dragonfly.Umbraco9DeployTools.Models;
+
+@model INodeDataItem
+@{
+    
+}
+
+<a href="/umbraco#/content/content/edit/@Model.NodeId" target="_blank">Edit</a>
+
+@*@if (Model.IsPublished)
+{
+    try
+    {
+ <span> | </span><a href="@content.UmbPublishedNode.Url()" target="_blank">View</a>
+    }
+    catch (Exception e)
+    {
+        <span> | [Error - No Published Url]</span>
+        <!-- Exception: @e.Message  -->
+    }
+   
+}*@
