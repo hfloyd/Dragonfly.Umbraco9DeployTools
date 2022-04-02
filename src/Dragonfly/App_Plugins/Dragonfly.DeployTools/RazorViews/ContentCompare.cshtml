@@ -1,17 +1,25 @@
 @using Dragonfly.NetHelpers
+@using Dragonfly.NetModels
+@using Dragonfly.Umbraco9DeployTools
 @using Dragonfly.Umbraco9DeployTools.Models;
+@using Dragonfly.UmbracoHelpers
+@using Umbraco.Cms.Core
+@using Umbraco.Cms.Core.Models
+@using Umbraco.Cms.Core.Services.Implement
 
 @model ComparisonResults
+@*
+	Expected View Data:
+	-------------------
+	StandardInfo (object - StandardViewInfo)		: Version, Current environment, etc.
+	Status (object - StatusMessage)					: Status of operations
 
+*@
 @{
-	//IEnumerable<AuditableContent> contentList = Model.ToList();
+	var paramStandardInfo = Mvc.GetSafeViewData(ViewData, "StandardInfo", new StandardViewInfo()) as StandardViewInfo;
+	var paramStatus = Mvc.GetSafeViewData(ViewData, "Status", new StatusMessage()) as StatusMessage;
 
-	//var propertyAlias = Dragonfly.UmbracoHelpers.Mvc.GetSafeViewDataString(ViewData, "PropertyAlias");
-	//var includeUnpublished = Dragonfly.UmbracoHelpers.Mvc.GetSafeViewDataBool(ViewData, "IncludeUnpublished");
-
-	var counter = 0;
-
-	//var filterdByDoctype = Dragonfly.NetHelpers.Urls.GetSafeQueryString(Request, "DocTypeAlias", "");
+	var results = Model;
 }
 
 <!DOCTYPE html>
@@ -19,61 +27,262 @@
 <head>
 	<link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" />
 	<link href="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/css/dataTables.bootstrap.min.css" rel="stylesheet" />
-	
+
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/js/jquery.dataTables.min.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/js/dataTables.bootstrap.min.js"></script>
 
-	@*<style>
-		{
-
+	<style>
+		.compare-icon.text-warning {
+			color: #f9c36b;
 		}
-		</style>*@
+
+		.compare-icon.text-success {
+			color: green;
+		}
+	</style>
 	@*<!--<script src="/scripts/snippet-javascript-console.min.js?v=1"></script>-->*@
 </head>
 <body>
 	<div class="container-full" style="margin: 0 10px;">
 
-		<h1>Comparing Content</h1>
+		<h1>Comparing Content <small>v. @paramStandardInfo.CurrentToolVersion</small></h1>
 
-		<h5>Current Environment = @Model.LocalEnvironment.Name</h5>
-		<h5>Remote Environment = @Model.RemoteEnvironment.Name</h5>
+		@if (paramStatus != null && (paramStatus.HasAnyExceptions() || paramStatus.HasAnyFailures()))
+		{
+			<h2>Status</h2>
+			@try
+			{
+				Html.RenderPartial("/App_Plugins/Dragonfly.DeployTools/RazorViews/DataFormats/RenderStatusMessage.cshtml", paramStatus);
+			}
+			catch (Exception e)
+			{
+				<span>Unable to render Status : @e.Message</span>
+			}
 
-		<ol>
-			<li><a href="#RemoteNotLocal">Remote - Not Local</a> [@Model.RemoteNotLocal.Count()]</li>
-			<li><a href="#LocalNotRemote">Local - Not Remote</a> [@Model.LocalNotRemote.Count()]</li>
-			<li><a href="#Different">Different Between Environments</a> </li>
-		</ol>
-
-		<h2 id="RemoteNotLocal">Remote - Not Local <br /><small>[Consider Restoring these]</small></h2>
-		<p>Total Nodes: @Model.RemoteNotLocal.Count()</p>
-
-		@if(Model.RemoteNotLocal.Any())
-		{	RenderMissingFromEnvironmentNodesTable(Model.RemoteNotLocal, "Local");
-		}
-		
-		<h2 id="LocalNotRemote">Local - Not Remote <br /><small>[Consider Transferring these]</small></h2>
-		<p>Total Nodes: @Model.LocalNotRemote.Count()</p>
-
-		@if(Model.LocalNotRemote.Any())
-		{	RenderMissingFromEnvironmentNodesTable(Model.LocalNotRemote, "Remote");
 		}
 
-		<h2 id="Different">Different Between Environments</h2>
+		@if (results != null)
+		{
+			var remoteNotLocal = Model.ContentRemoteNotLocal.ToList();
+			var localNoteRemote = Model.ContentLocalNotRemote.ToList();
+			var differentNodes = results.ContentMatchingNodes.Where(n => n.NumberOfDifferences > 0).ToList();
 
+			<h5>Current Environment = @Model.LocalEnvironment.Name (@Model.LocalDataFileInfo.GetReadableTimestamp(true)) [Version @Model.LocalDataFileInfo.GeneratorVersion.ToString()]</h5>
+			<h5>Remote Environment = @Model.RemoteEnvironment.Name (@Model.RemoteDataFileInfo.GetReadableTimestamp(true)) [Version @Model.RemoteDataFileInfo.GeneratorVersion.ToString()]</h5>
+
+			<ol>
+				<li><a href="#RemoteNotLocal">Remote - Not Local</a> [@remoteNotLocal.Count]</li>
+				<li><a href="#LocalNotRemote">Local - Not Remote</a> [@localNoteRemote.Count]</li>
+				<li><a href="#Different">Different Between Environments</a> [@differentNodes.Count]</li>
+			</ol>
+
+			<h2 id="RemoteNotLocal">Remote - Not Local <br /></h2>
+			<p><small>[Consider Restoring these]</small></p>
+			<p>Total Nodes: @remoteNotLocal.Count</p>
+
+			@if (remoteNotLocal.Any())
+			{
+				RenderMissingFromEnvironmentNodesTable(remoteNotLocal, Model.RemoteEnvironment);
+			}
+
+			<h2 id="LocalNotRemote">Local - Not Remote <br /></h2>
+			<p><small>[Consider Transferring these]</small></p>
+			<p>Total Nodes: @localNoteRemote.Count</p>
+
+			@if (localNoteRemote.Any())
+			{
+				RenderMissingFromEnvironmentNodesTable(localNoteRemote, Model.LocalEnvironment);
+			}
+
+			<h2 id="Different">Different Between Environments</h2>
+			<p>Different Nodes: @differentNodes.Count</p>
+
+			@if (differentNodes.Any())
+			{
+				RenderNodeDifferencesTable(differentNodes);
+			}
+		}
+
+		}
 	</div>
-
-
 
 </body>
 </html>
 
 @functions {
 
-	private void RenderMissingFromEnvironmentNodesTable(IEnumerable<ContentNodeDataItem> ContentNodeDataItems, string MissingFromEnvironment)
+	private void RenderNodeDifferencesTable(IEnumerable<NodeItemMatches> DifferentNodes)
 	{
-		var tableId = $"umbracodata_Missing_{MissingFromEnvironment.MakeCodeSafe()}";
-		var counter = 1;
+		var tableId = $"umbracodata_Differences";
+		var counter = 0;
+
+		<table id="@tableId" class="table table-striped table-bordered table-hover table-sm" cellspacing="0" style="width:100%">
+			<thead>
+				<tr>
+					<th>#</th>
+					<th>Actions</th>
+					<th>DocType</th>
+					<th>Parent Node</th>
+					<th>Local Name</th>
+					<th>Number of Differences</th>
+					<th>Details</th>
+				</tr>
+			</thead>
+			<tbody>
+				@foreach (var node in DifferentNodes)
+				{
+					var localContentNode = node.LocalNode as ContentNodeDataItem;
+
+					counter++;
+
+					<tr>
+						<td>@counter</td>
+
+						@* //Actions*@
+						<td>
+							@try
+							{
+								Html.RenderPartial("/App_Plugins/Dragonfly.DeployTools/RazorViews/DataFormats/NodeActions.cshtml", node.LocalNode, new ViewDataDictionary(ViewData)
+				{
+				{"EnvironmentForLink",Model.LocalEnvironment},
+				{"NodeType","Content"}
+				});
+							}
+							catch (Exception e)
+							{
+								<span>Error on Node # @node.LocalNode.NodeId : @e.Message</span>
+							}
+							@*&nbsp;|&nbsp;*@
+							@try
+							{
+								Html.RenderPartial("/App_Plugins/Dragonfly.DeployTools/RazorViews/DataFormats/NodeActions.cshtml", node.RemoteNode, new ViewDataDictionary(ViewData)
+				{
+				{"EnvironmentForLink",Model.RemoteEnvironment},
+				{"NodeType","Content"}
+				});
+							}
+							catch (Exception e)
+							{
+								<span>Error on Node # @node.RemoteNode.NodeId : @e.Message</span>
+							}
+						</td>
+
+						@* //Node UDI
+							<td><small>@node.LocalNode.NodeUdi</small></td>*@
+
+						@* //DocType*@
+						<td>@localContentNode.ContentTypeAlias</td>
+
+						@* //Parent Node*@
+						<td>@(localContentNode.ParentNodeInfo!=null?localContentNode.ParentNodeInfo.NodeName : "UNKNOWN")</td>
+
+						@* //Node Name*@
+						<td>@node.LocalNode.NodeName</td>
+
+						@* //Number of Differences*@
+						<td>@node.NumberOfDifferences</td>
+
+						@* //Details*@
+						<td>
+							<table class="table table-condensed">
+								<tr>
+									<th>Property</th>
+									<th>Comparison</th>
+									<th>Local Value</th>
+									<th>Remote Value</th>
+
+								</tr>
+								@foreach (var compare in node.Comparisons)
+								{
+									<tr>
+										<td>@compare.PropertyName</td>
+										<td>
+											@{
+												RenderComparisonResultIcon(compare.Result);
+											}
+										</td>
+										<td><small>@compare.LocalValue</small></td>
+										<td><small>@compare.RemoteValue</small></td>
+									</tr>
+								}
+
+							</table>
+						</td>
+
+					</tr>
+				}
+			</tbody>
+			<tfoot>
+				<tr>
+					<td>#</td>
+					<td>Actions</td>
+					<th>DocType</th>
+					<th>Local Name</th>
+					<th>Number of Differences</th>
+					<td>Details</td>
+				</tr>
+			</tfoot>
+		</table>
+
+		RenderTableScripts(tableId);
+	}
+
+	private void RenderComparisonResultIcon(ComparisonResult ComparisonResult)
+	{
+		var icon = "";
+		var color = "";
+
+		switch (ComparisonResult)
+		{
+			case ComparisonResult.Same:
+				icon = "glyphicon-ok";
+				color = "success";
+				break;
+
+			case ComparisonResult.Different:
+				icon = "glyphicon-exclamation-sign";
+				color = "warning";
+				break;
+
+			case ComparisonResult.DifferentRemotePreferred:
+				icon = "glyphicon-cloud-download";
+				color = "warning";
+				break;
+
+			case ComparisonResult.DifferentLocalPreferred:
+				icon = "glyphicon-cloud-upload";// "glyphicon-circle-arrow-right";
+				color = "warning";
+				break;
+
+			case ComparisonResult.DifferentIrrelevant:
+				icon = "glyphicon-ok";
+				color = "warning";
+				break;
+
+			case ComparisonResult.Unknown:
+				icon = "glyphicon-exclamation-sign";
+				color = "danger";
+				break;
+
+			default:
+				icon = "";
+				color = "";
+				break;
+		}
+
+		<span class="compare-icon text-@color">
+			<span class="glyphicon @icon" aria-hidden="true" title="@ComparisonResult.GetFriendlyString()"></span>
+		</span>
+		<span class="sr-only">@ComparisonResult.GetFriendlyString()</span>
+
+	}
+
+	private void RenderMissingFromEnvironmentNodesTable(IEnumerable<ContentNodeDataItem> ContentNodeDataItems, Workspace EnvironmentWithNodes)
+	{
+		var envForLinks = EnvironmentWithNodes;
+		var tableId = $"umbracodata_OnlyOn_{EnvironmentWithNodes.Type.MakeCodeSafe()}";
+		var counter = 0;
 
 		<table id="@tableId" class="table table-striped table-bordered table-hover table-sm" cellspacing="0" style="width:100%">
 			<thead>
@@ -97,7 +306,7 @@
 				@foreach (var node in ContentNodeDataItems)
 				{
 					counter++;
-				
+
 					<tr>
 						<td>@counter</td>
 
@@ -105,7 +314,11 @@
 						<td>
 							@try
 							{
-								Html.RenderPartial("/App_Plugins/Dragonfly.DeployTools/RazorViews/DataFormats/NodeActions.cshtml", node);
+								Html.RenderPartial("/App_Plugins/Dragonfly.DeployTools/RazorViews/DataFormats/NodeActions.cshtml", node, new ViewDataDictionary(ViewData)
+				{
+				{"EnvironmentForLink",envForLinks},
+				{"NodeType","Content"}
+				});
 							}
 							catch (Exception e)
 							{
@@ -120,14 +333,14 @@
 						<td>@node.NodeId</td>
 
 						@* //Node Path
-						<td>@node.NodePathAsText</td>*@
+							<td>@node.NodePathAsText</td>*@
 
 						@* //DocType*@
 						<td>@node.ContentTypeAlias</td>
 
 						@* //Parent*@
-						<td>@node.ParentNodeUdi</td>
-						
+						<td><small>@(node.ParentNodeInfo!=null?node.ParentNodeInfo.NodeName : "UNKNOWN")</small></td>
+
 						@* //Level*@
 						<td>@node.LevelNum</td>
 
@@ -135,11 +348,13 @@
 						<td>@node.OrderNum</td>
 
 						@* //Template Name
-						<td>@node.TemplateAlias</td>*@
+							<td>@node.TemplateAlias</td>*@
 
 						@*//Date Last Edited*@
 						<td>
-							@{ Html.RenderPartial("/App_Plugins/Dragonfly.DeployTools/RazorViews/DataFormats/DateValue.cshtml", node.LastEditedDate); }
+							@{
+								Html.RenderPartial("/App_Plugins/Dragonfly.DeployTools/RazorViews/DataFormats/DateValue.cshtml", node.LastEditedDate);
+							}
 						</td>
 
 						@* //Edited By *@
@@ -204,4 +419,5 @@
 		</script>
 	}
 
+	
 }

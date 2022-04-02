@@ -1,0 +1,46 @@
+@using Dragonfly.NetModels;
+@using Newtonsoft.Json
+
+@model StatusMessage
+
+@if (Model != null)
+{
+	RenderMessage(Model);
+}
+
+@functions
+{
+	private void RenderMessage(StatusMessage Msg)
+	{
+		var alertClass = Msg.Success ? "alert-success" : "alert-danger";
+		var objPrefix = !string.IsNullOrEmpty(Msg.ObjectName) ? $"{Msg.ObjectName}: " : "";
+		var title =objPrefix + (Msg.HasMessage ? Msg.Message : $"Status: {(Msg.Success ? "Success": "Failure")}");
+
+		<div class="alert @alertClass" style="margin-left: 50px;" role="alert">
+			<h4>@title</h4>
+			<p>
+				@if (!string.IsNullOrEmpty(Msg.MessageDetails))
+				{
+					<span><b>Details: </b>@Msg.MessageDetails</span><br />
+				}
+				@if (Msg.RelatedException != null)
+				{
+					<h5>Exception:</h5>
+					<span><b>Message: </b>@Msg.RelatedException.Message</span><br />
+					<span><b>Source: </b>@Msg.RelatedException.Source</span><br />
+					<span><b>StackTrace: </b>@Msg.RelatedException.StackTrace</span><br />
+					<textarea rows="20" cols="200">
+						@JsonConvert.SerializeObject(Msg.RelatedException);
+					</textarea>
+				}
+			</p>
+			@if (Msg.InnerStatuses.Any())
+			{
+				foreach (var innerStatus in Msg.InnerStatuses)
+				{
+					RenderMessage(innerStatus);
+				}
+			}
+		</div>
+	}
+}

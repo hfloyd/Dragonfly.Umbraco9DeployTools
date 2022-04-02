@@ -22,7 +22,7 @@
     //Usage (in a Controller): string html = await m_RenderService.RenderToStringAsync("<NameOfPartial>", new Model());
     public interface IViewRenderService
     {
-        Task<string> RenderToStringAsync(HttpContext httpContext, string viewName, object model);
+        Task<string> RenderToStringAsync(HttpContext HttpContext, string ViewName, object Model, Dictionary<string, object> ViewDataDictionary = null);
     }
 
     public class ViewRenderService : IViewRenderService
@@ -40,25 +40,33 @@
 
             //  _serviceProvider = serviceProvider;
         }
-        public async Task<string> RenderToStringAsync(HttpContext httpContext, string viewName, object model)
+        public async Task<string> RenderToStringAsync(HttpContext HttpContext, string ViewName, object Model, Dictionary<string, object> ViewDataDictionary = null)
         {
             //  var httpContext = new DefaultHttpContext { RequestServices = _serviceProvider };
            // var httpContext = _contextAccessor.HttpContext;
-            var actionContext = new ActionContext(httpContext, new RouteData(), new ActionDescriptor());
+            var actionContext = new ActionContext(HttpContext, new RouteData(), new ActionDescriptor());
 
             using (var sw = new StringWriter())
             {
-                var viewResult = _razorViewEngine.GetView(viewName, viewName, false);
+                var viewResult = _razorViewEngine.GetView(ViewName, ViewName, false);
 
                 if (viewResult.View == null)
                 {
-                    throw new ArgumentNullException($"{viewName} does not match any available view");
+                    throw new ArgumentNullException($"{ViewName} does not match any available view");
                 }
 
                 var viewDictionary = new ViewDataDictionary(new EmptyModelMetadataProvider(), new ModelStateDictionary())
                 {
-                    Model = model
+                    Model = Model
                 };
+
+                if (ViewDataDictionary != null)
+                {
+                    foreach (var item in ViewDataDictionary)
+                    {
+                        viewDictionary.Add(item.Key,item.Value);
+                    }
+                }
 
                 var viewContext = new ViewContext(
                     actionContext,

@@ -122,8 +122,8 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
             }
         }
 
-        //  /umbraco/Dragonfly/RemoteDeployTools/ExportContentData?ReturnType=Json&Key=xxx
-        //  /umbraco/Dragonfly/RemoteDeployTools/ExportContentData?ReturnType=File&Key=xxx
+        //  /umbraco/Dragonfly/RemoteDeployTools/ExportContentData?UpdateNow=true&ReturnType=Json&Key=xxx
+        //  /umbraco/Dragonfly/RemoteDeployTools/ExportContentData?UpdateNow=true&ReturnType=File&Key=xxx
         [HttpGet]
         public IActionResult ExportContentData(bool UpdateNow, string ReturnType,string Key)
         {
@@ -142,7 +142,6 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
                     try
                     {
                         status.InnerStatuses.Add(_deployToolsService.SaveContentNodesData());
-                        status.InnerStatuses.Add(_deployToolsService.SaveMediaNodesData());
                     }
                     catch (Exception ex)
                     {
@@ -200,10 +199,10 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
             }
         }
 
-        //  /umbraco/Dragonfly/RemoteDeployTools/ExportMediaData?ReturnType=Json&Key=xxx
-        //  /umbraco/Dragonfly/RemoteDeployTools/ExportMediaData?ReturnType=File&Key=xxx
+        //  /umbraco/Dragonfly/RemoteDeployTools/ExportMediaData?UpdateNow=true&ReturnType=Json&Key=xxx
+        //  /umbraco/Dragonfly/RemoteDeployTools/ExportMediaData?UpdateNow=true&ReturnType=File&Key=xxx
         [HttpGet]
-        public IActionResult ExportMediaData(string ReturnType, string Key)
+        public IActionResult ExportMediaData(bool UpdateNow, string ReturnType, string Key)
         {
             var validAccess = false; //blank Keys are not allowed
             if (Key != "")
@@ -213,6 +212,25 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
 
             if (validAccess)
             {
+                if (UpdateNow)
+                {
+                    var status = new StatusMessage(true);
+
+                    try
+                    {
+                        status.InnerStatuses.Add(_deployToolsService.SaveMediaNodesData());
+                    }
+                    catch (Exception ex)
+                    {
+                        status.RelatedException = ex;
+                        status.Success = false;
+                        status.Message = "Failure while running Dragonfly DeployTools: ExportContentData";
+                        _logger.LogError(ex, status.Message);
+                    }
+
+                }
+
+                //Export
                 var thisEnvironment = _deployToolsService.GetCurrentEnvironment();
                 var saveFileName = _deployToolsService.EnvironmentFilePath(DeployToolsService.NodesType.Media, thisEnvironment, true);
                 var fileContents = _deployToolsService.RetrieveFileContents(DeployToolsService.NodesType.Media, thisEnvironment);

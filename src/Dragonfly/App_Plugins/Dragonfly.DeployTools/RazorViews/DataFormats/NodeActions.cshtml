@@ -1,11 +1,26 @@
 @using Dragonfly.Umbraco9DeployTools.Models;
+@using Dragonfly.Umbraco9DeployTools.Services
+@using Dragonfly.UmbracoHelpers
 
 @model INodeDataItem
+@*
+	Expected View Data:
+	-------------------
+	EnvironmentForLink (object - Workspace)			: Environment
+    NodeType  (string) 
+*@
 @{
-    
+	var paramStandardInfo = Mvc.GetSafeViewData(ViewData, "StandardInfo", new StandardViewInfo()) as StandardViewInfo;
+	var paramEnvironment = Mvc.GetSafeViewData(ViewData, "EnvironmentForLink") as Workspace;
+	var paramNodeType = Mvc.GetSafeViewDataString(ViewData, "NodeType", "Content") ;
+
+    var envName = paramEnvironment != null ? paramEnvironment.Name : "";
+	var urlHost = paramEnvironment != null ? paramEnvironment.Url.ToString() : "";
+	var editUrl = $"{urlHost}umbraco#/{paramNodeType}/{paramNodeType}/edit/{@Model.NodeId}";
+	var btnClass  = paramStandardInfo.CurrentEnvironment != null ? (paramStandardInfo.CurrentEnvironment.Type == paramEnvironment.Type ? "btn-primary" : "btn-info") : "btn-default";
 }
 
-<a href="/umbraco#/content/content/edit/@Model.NodeId" target="_blank">Edit</a>
+<a style="width: 110px; margin-bottom: 2px;" class="btn btn-xs @btnClass" href="@editUrl" target="_blank">Open @envName Node</a>
 
 @*@if (Model.IsPublished)
 {

@@ -1,18 +1,47 @@
 @using Dragonfly.NetHelpers
+@using Dragonfly.NetModels
 @using Dragonfly.Umbraco9DeployTools.Models;
+@using Dragonfly.UmbracoHelpers
+@using Newtonsoft.Json
+@using Umbraco.Extensions
 
 @model List<Workspace>
-
+@*
+	Expected View Data:
+	-------------------
+	StandardInfo (object - StandardViewInfo)		: Version, Current environment, etc.
+	LocalFilesInfo (object - List<INodesDataFile>)  : Info about all local files
+	Status (object - StatusMessage)					: Status of operations
+*@
 @{
+	var paramStandardInfo = Mvc.GetSafeViewData(ViewData, "StandardInfo", new StandardViewInfo()) as StandardViewInfo;
+	var paramLocalFilesInfo = Mvc.GetSafeViewData(ViewData, "LocalFilesInfo") as List<INodesDataFile>;
+	var paramStatus = Mvc.GetSafeViewData(ViewData, "Status", new StatusMessage()) as StatusMessage;
 
-	var workspaces = Model;
-	var actions = new Dictionary<string, string>()
+	//List of All workspaces - add current environment, if not in list (ex: Local)
+	var workspaces = new List<Workspace>();
+	if (!Model.Select(n => n.Type).Contains(paramStandardInfo.CurrentEnvironment.Type))
+	{
+		workspaces.Add(paramStandardInfo.CurrentEnvironment);
+	}
+	workspaces.AddRange(Model);
+
+	var remoteActions = new Dictionary<string, string>()
 	{
 		{ "Fetch All Remote Nodes Data (Last run)", "/umbraco/backoffice/Dragonfly/DeployTools/FetchAllRemoteNodesData?UpdateRemoteFirst=false&EnvironmentType=" },
 		{ "Fetch All Remote Nodes Data (Most current)", "/umbraco/backoffice/Dragonfly/DeployTools/FetchAllRemoteNodesData?UpdateRemoteFirst=true&EnvironmentType=" },
 		{ "Compare Local to Remote", "/umbraco/backoffice/Dragonfly/DeployTools/CompareContent?EnvironmentType=" }
 	};
 
+	var localActions = new Dictionary<string, string>()
+	{
+		{ "Update All Local Nodes Data", "/umbraco/backoffice/Dragonfly/DeployTools/UpdateAllLocalNodesData" },
+		{ "Update Local Content Nodes Data", "/umbraco/backoffice/Dragonfly/DeployTools/UpdateLocalContentNodesData" },
+		{ "Update Local Media Nodes Data", "/umbraco/backoffice/Dragonfly/DeployTools/UpdateLocalMediaNodesData" }
+	};
+
+	var currEnvName = paramStandardInfo != null ? paramStandardInfo.CurrentEnvironment.Name : "Unknown";
+	var currVersion =paramStandardInfo != null ? paramStandardInfo.CurrentToolVersion.ToString(): "Unknown";
 }
 
 <!DOCTYPE html>
@@ -31,46 +60,128 @@
 <body>
 	<div class="container-full" style="margin: 0 10px;">
 
-		<h1>Dragonfly Deploy Tools</h1>
+		<h1>Dragonfly Deploy Tools <small>v. @currVersion</small></h1>
 
-		<h5>Current Environment</h5>
-		<a href="/umbraco/backoffice/Dragonfly/DeployTools/UpdateAllLocalNodesData">Update All Local Nodes Data</a>
+		<h2>Current Environment: @currEnvName</h2>
+		<a class="btn btn-info" href="/umbraco/backoffice/Dragonfly/DeployTools/UpdateAllLocalNodesData" target="_blank">Update All Local Nodes Data</a>
 
-		<h5>Remote Environments</h5>
+		<h2>Available Files</h2>
+		@if (paramLocalFilesInfo != null && paramLocalFilesInfo.Any())
+		{
+			<table id="umbracodata_Files" class="table table-striped table-bordered table-hover table-sm" cellspacing="0" style="width: 100%">
+				<thead>
+					<tr>
+						<th>Environment</th>
+						<th>Nodes Type</th>
+						<th>Total Nodes</th>
+						<th>Timestamp</th>
+						<th>Generation Time</th>
+					</tr>
+				</thead>
+				<tbody>
+
+					@foreach (var file in paramLocalFilesInfo)
+					{
+						<tr>
+							<td>@(file.Environment!=null ?file.Environment.Name: "Unknown")</td>
+							<td>@file.Type</td>
+							<td>@file.TotalNodes</td>
+							<td>@file.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss UTC") [@file.GetReadableTimestamp(true)]</td>
+							<td>@file.TimeToGenerate [@file.GetTimeToGenerateDisplay()]</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+		else
+		{
+			<p>No files available locally. [@Html.If(paramLocalFilesInfo == null, "NULL", "0")]</p>
+		}
+
+		<h2>Remote Environments Actions</h2>
 		<table id="umbracodata_Environments" class="table table-striped table-bordered table-hover table-sm" cellspacing="0" style="width:100%">
 			<thead>
 				<tr>
 					<th>&nbsp;</th>
 					@foreach (var env in workspaces)
 					{
-						<th>@env.Name</th>
+						var className = env.Type == paramStandardInfo.CurrentEnvironment.Type ? "active" : "";
+						
+						<th class="@className">@env.Name</th>
 					}
 				</tr>
 			</thead>
 			<tbody>
+			@foreach (var action in localActions)
+			{
+				<tr>
+					<td>@action.Key</td>
 
-				@foreach (var action in actions)
+					@foreach (var env in workspaces)
+					{
+						var className = env.Type == paramStandardInfo.CurrentEnvironment.Type ? "active" : "";
+						if (env.Type == paramStandardInfo.CurrentEnvironment.Type)
+						{
+							var actionUrl = $"{action.Value}";
+
+							<td class="@className"><a href="@actionUrl" target="_blank" class="btn btn-info">Run</a></td>
+						}
+						else
+						{
+							<td class="@className"><i>N/A</i></td>
+						}
+					}
+				</tr>
+			}
+				@foreach (var action in remoteActions)
 				{
-					var actionUrl = action.Value;
 					<tr>
 						<td>@action.Key</td>
-
+						
 						@foreach (var env in workspaces)
 						{
-							var url = $"{actionUrl}{env.Type}";
-							<td>@url</td>
+							var className = env.Type == paramStandardInfo.CurrentEnvironment.Type ? "active" : "";
+							if (env.Type != paramStandardInfo.CurrentEnvironment.Type)
+							{
+								var actionUrl = $"{action.Value}{env.Type}";
+
+								<td class="@className"><a href="@actionUrl" target="_blank" class="btn btn-info">Run</a></td>
+							}
+							else
+							{
+								<td class="@className"><i>N/A</i></td>
+							}
 						}
 					</tr>
 				}
 			</tbody>
 		</table>
 
+		<h2>Status</h2>
+		@try
+		{
+			Html.RenderPartial("/App_Plugins/Dragonfly.DeployTools/RazorViews/DataFormats/RenderStatusMessage.cshtml", paramStatus);
+		}
+		catch (Exception e)
+		{
+			<span>Unable to render Status : @e.Message</span>
+		}
+		
+
+	@*	<textarea rows="20" cols="200">
+			@JsonConvert.SerializeObject(paramStatus);
+		</textarea>*@
 
 	</div>
 
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/js/jquery.dataTables.min.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/js/dataTables.bootstrap.min.js"></script>
+
+	@{
+		RenderTableScripts("umbracodata_Files");
+		RenderTableScripts("umbracodata_Environments");
+	}
 
 </body>
 </html>

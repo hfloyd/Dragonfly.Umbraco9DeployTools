@@ -1,9 +1,11 @@
 ﻿namespace Dragonfly.Umbraco9DeployTools.Services
 {
     using System;
+    using System.Collections;
     using System.Collections.Generic;
     using System.Diagnostics.Eventing.Reader;
     using System.Drawing;
+    using System.IO;
     using System.Linq;
     using System.Net;
     using System.Net.Http;
@@ -25,7 +27,7 @@
     using Umbraco.Cms.Web.Common;
     using Umbraco.Extensions;
 
-    public class DeployToolsService
+    public partial class DeployToolsService
     {
         public enum NodesType
         {
@@ -86,621 +88,108 @@
             return "~/App_Plugins/Dragonfly.DeployTools/";
         }
 
-        internal static string TimestringFormat()
-        {
-            return "yyyy-MM-dd-HH-mm-ss-UTC";
-        }
 
         #region Content Nodes
 
-        private const string CONTENT_FILE_NAME = "ContentNodesData";
-
-        #region READ
-        public ContentNodesDataFile AccessContentDataFile(string EnvironmentType)
-        {
-
-            var data = new ContentNodesDataFile();
-            var environment = LookupEnvironmentByType(EnvironmentType);
-            var readResult = ReadContentNodesDataFile(environment, out data);
-
-            return data;
-        }
-
-        public StatusMessage FetchRemoteContentNodesData(string EnvironmentType, bool UpdateRemoteDataBeforeFetching = false)
-        {
-            var status = new StatusMessage(true);
-
-            var targetEnvironment = LookupEnvironmentByType(EnvironmentType);
-
-            if (targetEnvironment == null)
-            {
-                status.Success = false;
-                status.Message = $"No Deploy Workspace found to match type '{EnvironmentType}'.";
-                return status;
-            }
-
-            var remoteFileAccessUrl = "";
-            if (UpdateRemoteDataBeforeFetching)
-            {
-                remoteFileAccessUrl = ConstructRemoteUrl(targetEnvironment, "ExportContentData?UpdateNow=true&ReturnType=File", true);
-            }
-            else
-            {
-                remoteFileAccessUrl = ConstructRemoteUrl(targetEnvironment, "ExportContentData?UpdateNow=false&ReturnType=File", true);
-            }
-
-            var localSavePathVirtual = EnvironmentFilePath(NodesType.Content, targetEnvironment);
-            var localSavePathPhysical = _FileHelperService.GetMappedPath(localSavePathVirtual);
-            status.Message = $"Fetching ContentNodesData from {targetEnvironment.Name} to '{localSavePathVirtual}'";
-            status.MessageDetails = localSavePathPhysical;
-            status.ObjectName = remoteFileAccessUrl;
-
-            try
-            {
-                WebClient client = new WebClient();
-                var remoteUri = new Uri(remoteFileAccessUrl);
-                client.DownloadFile(remoteUri, localSavePathPhysical);
-            }
-            catch (Exception e)
-            {
-                status.Success = false;
-                status.RelatedException = e;
-                // throw;
-            }
-
-            return status;
-        }
-
-        public ComparisonResults CompareContentNodes(string EnvironmentType)
-        {
-            var compareModel = new ComparisonResults();
-            var status = new StatusMessage(true);
-
-            //Get environments
-            var remoteEnvironment = LookupEnvironmentByType(EnvironmentType);
-
-            if (remoteEnvironment == null)
-            {
-                //throw new Exception($"No Deploy Workspace found to match type '{EnvironmentType}'.");
-                status.Success = false;
-                status.Message = $"No Deploy Workspace found to match type '{EnvironmentType}'.";
-                compareModel.Status = status;
-                return compareModel;
-            }
-
-            var localEnvironment = GetCurrentEnvironment();
-
-            compareModel.LocalEnvironment = localEnvironment;
-            compareModel.RemoteEnvironment = remoteEnvironment;
-
-            //Get local data set
-            ContentNodesDataFile localData;
-            var statusReadLocal = ReadContentNodesDataFile(localEnvironment, out localData);
-            status.InnerStatuses.Add(statusReadLocal);
-            //....If no file, try saving.
-            var localUdis = localData.ContentNodes.Select(n => n.NodeUdi).ToList();
-
-            //Get remote data set
-            ContentNodesDataFile remoteData;
-            var statusReadRemote = ReadContentNodesDataFile(remoteEnvironment, out remoteData);
-            status.InnerStatuses.Add(statusReadRemote);
-            //...If no file, try downloading. If no file on remote, trigger remote Save
-            //...  /umbraco/Dragonfly/RemoteDeployTools/TriggerMediaDataSave?Key=xxx
-            var remoteUdis = remoteData.ContentNodes.Select(n => n.NodeUdi).ToList();
-
-            //Find Nodes which are local and NOT remote
-            var localNotRemote = localUdis.Except(remoteUdis);
-            compareModel.LocalNotRemote = localData.ContentNodes.Where(n => localNotRemote.Contains(n.NodeUdi));
-
-            //Find Nodes which are remote and NOT local
-            var remoteNotLocal = remoteUdis.Except(localUdis);
-            compareModel.RemoteNotLocal = remoteData.ContentNodes.Where(n => remoteNotLocal.Contains(n.NodeUdi));
-
-            //Compare nodes which are on both environments
-
-
-            compareModel.Status = status;
-            return compareModel;
-        }
-
-        private StatusMessage ReadContentNodesDataFile(Workspace Environment, out ContentNodesDataFile Data)
-        {
-            var msg = new StatusMessage();
-
-            var fullFilename = EnvironmentFilePath(NodesType.Content, Environment);
-
-            try
-            {
-                //Get saved data
-                var json = _FileHelperService.GetTextFileContents(fullFilename);
-                Data = JsonConvert.DeserializeObject<ContentNodesDataFile>(json);
-
-                msg.Success = true;
-                msg.Message = $"Data read from '{fullFilename}'.";
-            }
-            catch (Exception e)
-            {
-                msg.Success = false;
-                msg.Message = $"Unable to read data from '{fullFilename}'.";
-                msg.RelatedException = e;
-                Data = null;
-            }
-
-            msg.TimestampEnd = DateTime.Now;
-            return msg;
-        }
-
-        #endregion
-
-        #region WRITE
-        public StatusMessage SaveContentNodesData()
-        {
-            var status = new StatusMessage(true);
-
-            //Setup
-            var requestUri = Dragonfly.NetHelpers.Urls.CurrentRequestUri(_Context.Request);
-            var hostname = requestUri != null ? requestUri.Host : "UNKNOWN";
-            var environment = LookupEnvironment(requestUri);
-
-            status.Message = $"Running SaveContentNodesData() on '{hostname}' [{environment.Name}] environment";
-
-            var results = GetContentNodesData(hostname, environment.Name);
-
-            //Save Results
-            status.InnerStatuses.Add(SaveContentData(results, environment));
-
-            //var filename = "";
-            //if (status.Success)
-            //{
-            //    filename = status.ObjectName.Replace(_TesterConfig.GetDataPath(), "");
-            //}
-
-            status.TimestampEnd = DateTime.Now;
-            status.MessageDetails = $"Operation took {status.TimeDuration().ToString()}";
-            return status;
-        }
-
-        private StatusMessage SaveContentData(ContentNodesDataFile Data, Workspace Environment)
-        {
-            var status = new StatusMessage(true);
-            status.Message = $"Running SaveContentData() [{Environment.Name}] environment.";
-            status.MessageDetails = $"There are {Data.ContentNodes.Count} Content nodes in the Data.";
-            //status.RelatedObject = Data;
-
-            var fullFilename = EnvironmentFilePath(NodesType.Content, Environment);
-
-            try
-            {
-                var json = JsonConvert.SerializeObject(Data);
-                status.InnerStatuses.Add(DoFileSave(fullFilename, json));
-            }
-            catch (Exception e)
-            {
-                status.Success = false;
-                status.Message = $"Unable to save Content data to '{fullFilename}'.";
-                status.RelatedException = e;
-            }
-
-            status.TimestampEnd = DateTime.Now;
-            return status;
-        }
-
-        public ContentNodesDataFile GetContentNodesData(string EnvironmentHost, string EnvironmentName)
-        {
-            var functionName = "Dragonfly.DeployToolsService GetContentNodesData";
-            _logger.LogInformation($"{functionName} Started ...");
-
-            var results = new ContentNodesDataFile();
-            results.Timestamp = DateTime.Now;
-            results.EnvironmentHost = EnvironmentHost;
-            results.EnvironmentName = EnvironmentName;
-
-
-            //CONTENT NODES
-            _ContentResultsList = new List<ContentNodeDataItem>();
-            _ContentResultsCounter = 0;
-
-            var rootContent = _services.ContentService.GetRootContent();
-            if (rootContent != null)
-            {
-                foreach (var c in rootContent.OrderBy(n => n.SortOrder))
-                {
-                    _logger.LogDebug("{Function} : {Message} : {NodeId}", functionName, "Starting RecursiveGetContentNodes()", c.Id);
-                    RecursiveGetContentNodes(c);
-                }
-            }
-            else
-            {
-                _logger.LogWarning("{Function} : {Message}", functionName, "ROOT CONTENT IS NULL");
-            }
-
-            results.ContentNodes = _ContentResultsList;
-            results.TotalContentNodes = _ContentResultsList.Count;
-
-            //Finish up
-            var duration = DateTime.Now - results.Timestamp;
-            results.TimeToGenerate = duration;
-            results.TimeToGenerateDisplay = $"{duration.Hours}:{duration.Minutes}:{duration.Seconds}.{duration.Milliseconds}";
-
-            _logger.LogInformation($"... {functionName}  Completed in {results.TimeToGenerateDisplay }");
-            return results;
-        }
-
-        protected void RecursiveGetContentNodes(IContent Content)
-        {
-            var functionName = "Dragonfly.DeployToolsService RecursiveGetContentNodes";
-
-            if (Content != null && !Content.Trashed)
-            {
-                _logger.LogDebug("{Function} : {Message} : {NodeId}", functionName, "Starting LogContentNode()", Content.Id);
-                LogContentNode((Content)Content);
-
-                if (_services.ContentService.HasChildren(Content.Id))
-                {
-                    var countChildren = _services.ContentService.CountChildren(Content.Id);
-                    long xTotalRecs;
-                    var allChildren = _services.ContentService.GetPagedChildren(Content.Id, 0, countChildren, out xTotalRecs);
-
-                    foreach (var child in allChildren.OrderBy(n => n.SortOrder))
-                    {
-                        RecursiveGetContentNodes(child);
-                    }
-                }
-            }
-        }
-
-        protected void LogContentNode(IContent Content)
-        {
-            if (Content != null && Content.Id > 0)
-            {
-                _ContentResultsCounter += 1;
-
-                //Set basic node info
-                var result = new ContentNodeDataItem();
-                result.NodeId = Content.Id;
-                result.NodeUdi = Content.GetUdi();
-                result.NodeName = Content.Name;
-                result.ContentTypeAlias = Content.ContentType.Alias;
-                result.IsPublished = Content.Published;
-                result.LastEditedDate = Content.UpdateDate;
-                result.LastEditedByUser = GetUserName(Content.WriterId);
-                result.ParentNodeUdi = GetContentNodeUdi(Content.ParentId);
-                result.LevelNum = Content.Level;
-                result.OrderNum = Content.SortOrder;
-                result.UniversalSortInt = _ContentResultsCounter;
-
-
-
-                _ContentResultsList.Add(result);
-            }
-        }
-        #endregion
-
-        private Udi GetContentNodeUdi(int ContentId)
-        {
-            var node = _services.ContentService.GetById(ContentId);
-            if (node != null)
-            {
-                return node.GetUdi();
-            }
-            else
-            {
-                return null;
-            }
-
-        }
+        //See separate partial file for Content 
 
         #endregion
 
         #region Media Nodes
 
-        private const string MEDIA_FILE_NAME = "MediaNodesData";
+        //See separate partial file for  Media
 
-        #region READ
-        public MediaNodesDataFile AccessMediaDataFile(string EnvironmentType)
-        {
-            var data = new MediaNodesDataFile();
-            var environment = LookupEnvironmentByType(EnvironmentType);
-            var readResult = ReadMediaNodesDataFile(environment, out data);
-            return data;
-        }
-
-        public StatusMessage FetchRemoteMediaNodesData(string EnvironmentType, bool UpdateRemoteDataBeforeFetching = false)
-        {
-            var status = new StatusMessage(true);
-
-            var targetEnvironment = LookupEnvironmentByType(EnvironmentType);
-
-            if (targetEnvironment == null)
-            {
-                status.Success = false;
-                status.Message = $"No Deploy Workspace found to match type '{EnvironmentType}'.";
-                return status;
-            }
-
-            var remoteFileAccessUrl = "";
-            if (UpdateRemoteDataBeforeFetching)
-            {
-                remoteFileAccessUrl = ConstructRemoteUrl(targetEnvironment, "ExportMediaData?UpdateNow=true&ReturnType=File", true);
-            }
-            else
-            {
-                remoteFileAccessUrl = ConstructRemoteUrl(targetEnvironment, "ExportMediaData?UpdateNow=false&ReturnType=File", true);
-            }
-
-            var localSavePathVirtual = EnvironmentFilePath(NodesType.Media, targetEnvironment);
-            var localSavePathPhysical = _FileHelperService.GetMappedPath(localSavePathVirtual);
-            status.Message = $"Fetching MediaNodesData from {targetEnvironment.Name} to '{localSavePathVirtual}'";
-            status.MessageDetails = localSavePathPhysical;
-            status.ObjectName = remoteFileAccessUrl;
-
-            try
-            {
-                WebClient client = new WebClient();
-                var remoteUri = new Uri(remoteFileAccessUrl);
-                client.DownloadFile(remoteUri, localSavePathPhysical);
-            }
-            catch (Exception e)
-            {
-                status.Success = false;
-                status.RelatedException = e;
-                // throw;
-            }
-
-            return status;
-        }
-
-
-        private StatusMessage ReadMediaNodesDataFile(Workspace Environment, out MediaNodesDataFile Data)
-        {
-            var msg = new StatusMessage();
-
-            var fullFilename = EnvironmentFilePath(NodesType.Media, Environment);
-            try
-            {
-                //Get saved data
-                var json = _FileHelperService.GetTextFileContents(fullFilename);
-                Data = JsonConvert.DeserializeObject<MediaNodesDataFile>(json);
-
-                msg.Success = true;
-                msg.Message = $"Data read from '{fullFilename}'.";
-            }
-            catch (Exception e)
-            {
-                msg.Success = false;
-                msg.Message = $"Unable to read data from '{fullFilename}'.";
-                msg.RelatedException = e;
-                Data = null;
-            }
-
-            msg.TimestampEnd = DateTime.Now;
-            return msg;
-        }
         #endregion
 
-        #region WRITE
-        public StatusMessage SaveMediaNodesData()
+        #region General INodeDataItem Fucntions
+
+        private IEnumerable<LocalRemoteComparison> CompareINodeDataItems(INodeDataItem LocalNode, INodeDataItem RemoteNode)
         {
-            var status = new StatusMessage(true);
+            var comparisons = new List<LocalRemoteComparison>();
 
-            //Setup
-            var requestUri = Dragonfly.NetHelpers.Urls.CurrentRequestUri(_Context.Request);
-            var hostname = requestUri != null ? requestUri.Host : "UNKNOWN";
-            var environment = LookupEnvironment(requestUri);
+            //Compare Props
+            var compName = new LocalRemoteComparison();
+            compName.PropertyName = "NodeName";
+            compName.LocalValue = LocalNode.NodeName;
+            compName.RemoteValue = RemoteNode.NodeName;
+            compName.Result = LocalNode.NodeName == RemoteNode.NodeName
+                ? ComparisonResult.Same
+                : ComparisonResult.Different;
+            comparisons.Add(compName);
 
-            status.Message = $"Running SaveMediaNodesData() on '{hostname}' [{environment.Name}] environment";
-
-            var results = GetMediaNodesData(hostname, environment.Name);
-
-            //Save Results
-            status.InnerStatuses.Add(SaveMediaData(results, environment));
-
-            //var filename = "";
-            //if (status.Success)
-            //{
-            //    filename = status.ObjectName.Replace(_TesterConfig.GetDataPath(), "");
-            //}
-
-            status.TimestampEnd = DateTime.Now;
-            status.MessageDetails = $"Operation took {status.TimeDuration().ToString()}";
-            return status;
-        }
-
-        private StatusMessage SaveMediaData(MediaNodesDataFile Data, Workspace Environment)
-        {
-            var status = new StatusMessage(true);
-            status.Message = $"Running SaveMediaData() [{Environment.Name}] environment.";
-            status.MessageDetails = $"There are {Data.MediaNodes.Count} Media nodes in the Data.";
-            //status.RelatedObject = Data;
-
-            var fullFilename = EnvironmentFilePath(NodesType.Media, Environment);
-
-            try
+            var compLastEditedDate = new LocalRemoteComparison();
+            compLastEditedDate.PropertyName = "LastEditedDate";
+            compLastEditedDate.LocalValue = LocalNode.LastEditedDate;
+            compLastEditedDate.RemoteValue = RemoteNode.LastEditedDate;
+            if (LocalNode.LastEditedDate == RemoteNode.LastEditedDate)
             {
-                var json = JsonConvert.SerializeObject(Data);
-                status.InnerStatuses.Add(DoFileSave(fullFilename, json));
+                compLastEditedDate.Result = ComparisonResult.Same;
             }
-            catch (Exception e)
+            else if (LocalNode.LastEditedDate > RemoteNode.LastEditedDate)
             {
-                status.Success = false;
-                status.Message = $"Unable to save Media data to '{fullFilename}'.";
-                status.RelatedException = e;
-            }
-
-            status.TimestampEnd = DateTime.Now;
-            return status;
-        }
-
-        public MediaNodesDataFile GetMediaNodesData(string EnvironmentHost, string EnvironmentName)
-        {
-            var functionName = "Dragonfly.DeployToolsService GetMediaNodesData";
-            _logger.LogInformation($"{functionName} Started ...");
-
-            var results = new MediaNodesDataFile();
-            results.Timestamp = DateTime.Now;
-            results.EnvironmentHost = EnvironmentHost;
-            results.EnvironmentName = EnvironmentName;
-
-            //MEDIA NODES
-            _MediaResultsList = new List<MediaNodeDataItem>();
-            _MediaResultsCounter = 0;
-
-            var rootMedia = _services.MediaService.GetRootMedia();
-            if (rootMedia != null)
-            {
-                foreach (var m in rootMedia.OrderBy(n => n.SortOrder))
-                {
-                    _logger.LogDebug("{Function} : {Message} : {NodeId}", functionName, "Starting RecursiveGetMediaNodes()", m.Id);
-                    RecursiveGetMediaNodes(m);
-                }
+                compLastEditedDate.Result = ComparisonResult.DifferentLocalPreferred;
             }
             else
             {
-                _logger.LogWarning("{Function} : {Message}", functionName, "ROOT MEDIA IS NULL");
+                compLastEditedDate.Result = ComparisonResult.DifferentRemotePreferred;
             }
+            comparisons.Add(compLastEditedDate);
 
-            results.MediaNodes = _MediaResultsList;
-            results.TotalMediaNodes = _MediaResultsList.Count;
-
-
-
-            //Finish up
-            var duration = DateTime.Now - results.Timestamp;
-            results.TimeToGenerate = duration;
-            results.TimeToGenerateDisplay = $"{duration.Hours}:{duration.Minutes}:{duration.Seconds}.{duration.Milliseconds}";
-
-            _logger.LogInformation($"... {functionName}  Completed in {results.TimeToGenerateDisplay }");
-            return results;
-        }
-
-        protected void RecursiveGetMediaNodes(IMedia Media)
-        {
-            var functionName = "Dragonfly.DeployToolsService RecursiveGetMediaNodes";
-
-            if (Media != null && !Media.Trashed)
+            var compLastEditedByUser = new LocalRemoteComparison();
+            compLastEditedByUser.PropertyName = "LastEditedByUser";
+            compLastEditedByUser.LocalValue = LocalNode.LastEditedByUser;
+            compLastEditedByUser.RemoteValue = RemoteNode.LastEditedByUser;
+            if (LocalNode.LastEditedByUser == "Administrator" || RemoteNode.LastEditedByUser == "Administrator")
             {
-                _logger.LogDebug("{Function} : {Message} : {NodeId}", functionName, "Starting LogMediaNode()", Media.Id);
-                LogMediaNode((Media)Media);
-
-                if (_services.MediaService.HasChildren(Media.Id))
-                {
-                    var countChildren = _services.MediaService.CountChildren(Media.Id);
-                    long xTotalRecs;
-                    var allChildren = _services.MediaService.GetPagedChildren(Media.Id, 0, countChildren, out xTotalRecs);
-
-                    foreach (var child in allChildren.OrderBy(n => n.SortOrder))
-                    {
-                        RecursiveGetMediaNodes(child);
-                    }
-                }
-            }
-        }
-
-        protected void LogMediaNode(IMedia Media)
-        {
-            if (Media != null && Media.Id > 0)
-            {
-                _MediaResultsCounter += 1;
-
-                //Set basic node info
-                var result = new MediaNodeDataItem();
-                result.NodeId = Media.Id;
-                result.NodeUdi = Media.GetUdi();
-                result.NodeName = Media.Name;
-                result.MediaTypeAlias = Media.ContentType.Alias;
-                result.FilePath = Media.HasProperty("umbracoFile") ? (Media.GetValue("umbracoFile") != null ? Media.GetValue("umbracoFile").ToString() : "MISSING") : "N/A";
-                result.LastEditedDate = Media.UpdateDate;
-                result.LastEditedByUser = GetUserName(Media.WriterId);
-                result.ParentNodeUdi = GetMediaNodeUdi(Media.ParentId);
-                result.LevelNum = Media.Level;
-                result.OrderNum = Media.SortOrder;
-                result.UniversalSortInt = _MediaResultsCounter;
-
-
-
-                _MediaResultsList.Add(result);
-            }
-        }
-        #endregion
-
-        private Udi GetMediaNodeUdi(int MediaId)
-        {
-            var node = _services.MediaService.GetById(MediaId);
-            if (node != null)
-            {
-                return node.GetUdi();
+                compLastEditedByUser.Result = ComparisonResult.DifferentIrrelevant;
             }
             else
             {
-                return null;
+                compLastEditedByUser.Result = LocalNode.LastEditedByUser == RemoteNode.LastEditedByUser
+                ? ComparisonResult.Same
+                : ComparisonResult.Different;
             }
+            comparisons.Add(compLastEditedByUser);
+
+            var compParentNodeUdi = new LocalRemoteComparison();
+            compParentNodeUdi.PropertyName = "ParentNodeUdi";
+            compParentNodeUdi.LocalValue = LocalNode.ParentNodeInfo!=null ? LocalNode.ParentNodeInfo.NodeUdi: LocalNode.ParentNodeUdi;
+            compParentNodeUdi.RemoteValue = RemoteNode.ParentNodeInfo!=null ? RemoteNode.ParentNodeInfo.NodeUdi: RemoteNode.ParentNodeUdi;
+            compParentNodeUdi.Result = compParentNodeUdi.LocalValue == compParentNodeUdi.RemoteValue
+                ? ComparisonResult.Same
+                : ComparisonResult.Different;
+            comparisons.Add(compParentNodeUdi);
+
+            var compOrderNum = new LocalRemoteComparison();
+            compOrderNum.PropertyName = "OrderNum";
+            compOrderNum.LocalValue = LocalNode.OrderNum;
+            compOrderNum.RemoteValue = RemoteNode.OrderNum;
+            compOrderNum.Result = LocalNode.OrderNum == RemoteNode.OrderNum
+                ? ComparisonResult.Same
+                : ComparisonResult.Different;
+            comparisons.Add(compOrderNum);
+
+
+            var compLevelNum = new LocalRemoteComparison();
+            compLevelNum.PropertyName = "LevelNum";
+            compLevelNum.LocalValue = LocalNode.LevelNum;
+            compLevelNum.RemoteValue = RemoteNode.LevelNum;
+            compLevelNum.Result = LocalNode.LevelNum == RemoteNode.LevelNum
+                ? ComparisonResult.Same
+                : ComparisonResult.Different;
+            comparisons.Add(compLevelNum);
+
+
+            return comparisons;
 
         }
-
 
 
         #endregion
 
         #region General Helpers
-        private string GetUserName(int UserId)
-        {
-            var user = _services.UserService.GetUserById(UserId);
-            if (user != null)
-            {
-                return user.Name;
-            }
-            else
-            {
-                return "UNKNOWN";
-            }
 
-        }
-
-        private StatusMessage DoFileSave(string FullFilename, string Json)
-        {
-            var msg = new StatusMessage();
-
-            try
-            {
-                var savedSuccessfully = _FileHelperService.CreateTextFile(FullFilename, Json, true, false);
-
-                if (savedSuccessfully)
-                {
-                    msg.Success = true;
-                    msg.Message = $"Data saved successfully to '{FullFilename}'.";
-                    msg.ObjectName = FullFilename;
-                }
-                else
-                {
-                    msg.Success = false;
-                    msg.Message = $"Unable to save data to '{FullFilename}'.";
-                    msg.MessageDetails = "Unknown issue";
-                }
-            }
-            catch (Exception e)
-            {
-                msg.Success = false;
-                msg.Message = $"Unable to save data to '{FullFilename}'.";
-                msg.RelatedException = e;
-            }
-
-            msg.TimestampEnd = DateTime.Now;
-            return msg;
-        }
-
-        //private string GetFullFilename(string BaseFilename, string EnvironmentName)
-        //{
-        //    var filename = EnvironmentName + "_" + BaseFilename;
-        //    var ext = filename.EndsWith(".json") ? "" : ".json";
-        //    return filename + ext;
-        //}
-        //private static string BuildFilePath(string Filename)
-        //{
-        //    var fullFilename = DataPath() + Filename ;
-
-        //    return fullFilename;
-        //}
-
+        #region Public
         public string EnvironmentFilePath(NodesType Type, Workspace Environment, bool ReturnFilenameOnly = false)
         {
             var baseFilename = "";
@@ -725,27 +214,6 @@
             {
                 return DataPath() + filename + ext;
             }
-
-
-        }
-        private CloudDeployConfig LoadDeployConfig(string FilePath)
-        {
-            var functionName = "Dragonfly.DeployToolsService LoadDeployConfig";
-
-            try
-            {
-                var json = _FileHelperService.GetTextFileContents(FilePath);
-
-                var config = JsonConvert.DeserializeObject<CloudDeployConfig>(json);
-
-                return config;
-            }
-            catch (Exception ex)
-            {
-                throw;
-                _logger.LogError(ex, "{Function} : {Message}", functionName, $"Unable to load config file '{FilePath}'");
-                return new CloudDeployConfig();
-            }
         }
 
         public Workspace GetCurrentEnvironment()
@@ -762,7 +230,7 @@
             var workspaces = new List<Workspace>();
             if (_DeployConfig != null)
             {
-                workspaces= _DeployConfig.Deploy.Project.Workspaces;
+                workspaces = _DeployConfig.Deploy.Project.Workspaces;
             }
 
             return workspaces;
@@ -829,6 +297,114 @@
             }
         }
 
+        public StatusMessage GetLocalFilesInfo(out List<INodesDataFile> DataList)
+        {
+            DataList = new List<INodesDataFile>();
+            var returnStatus = new StatusMessage(true);
+            returnStatus.ObjectName = "GetLocalFilesInfo";
+
+            IEnumerable<FileInfo> filesList;
+            var statusGetListOfFiles = GetListOfFiles(out filesList);
+            returnStatus.InnerStatuses.Add(statusGetListOfFiles);
+
+            if (filesList.Any())
+            {
+                foreach (var fileInfo in filesList)
+                {
+                    StatusMessage readStatus = new StatusMessage(true);
+                    readStatus.ObjectName = "GetLocalFilesInfo";
+                    try
+                    {
+                        //Read file
+                        NodesDataFile contents;
+                        readStatus = ReadNodesDataFile(fileInfo.FullName, out contents);
+
+                        var nodeFile = contents;
+                        DataList.Add(nodeFile);
+                    }
+                    catch (Exception e)
+                    {
+                        readStatus.Success = false;
+                        readStatus.Message = $"GetLocalFilesInfo: Failure getting file '{fileInfo.FullName}'.";
+                        readStatus.RelatedException = e;
+                    }
+                    returnStatus.InnerStatuses.Add(readStatus);
+                }
+            }
+
+            return returnStatus;
+        }
+
+        #endregion
+
+        #region Private
+        private string GetUserName(int UserId)
+        {
+            var user = _services.UserService.GetUserById(UserId);
+            if (user != null)
+            {
+                return user.Name;
+            }
+            else
+            {
+                return "UNKNOWN";
+            }
+
+        }
+
+        private StatusMessage DoFileSave(string FullFilename, string Json)
+        {
+            var msg = new StatusMessage();
+            msg.ObjectName = "DoFileSave";
+
+            try
+            {
+                var savedSuccessfully = _FileHelperService.CreateTextFile(FullFilename, Json, true, false);
+
+                if (savedSuccessfully)
+                {
+                    msg.Success = true;
+                    msg.Message = $"Data saved successfully to '{FullFilename}'.";
+                    msg.ObjectName = FullFilename;
+                }
+                else
+                {
+                    msg.Success = false;
+                    msg.Message = $"Unable to save data to '{FullFilename}'.";
+                    msg.MessageDetails = "Unknown issue";
+                }
+            }
+            catch (Exception e)
+            {
+                msg.Success = false;
+                msg.Message = $"Unable to save data to '{FullFilename}'.";
+                msg.RelatedException = e;
+            }
+
+            msg.TimestampEnd = DateTime.Now;
+            return msg;
+        }
+
+        private CloudDeployConfig LoadDeployConfig(string FilePath)
+        {
+            var functionName = "Dragonfly.DeployToolsService LoadDeployConfig";
+
+            try
+            {
+                var json = _FileHelperService.GetTextFileContents(FilePath);
+
+                var config = JsonConvert.DeserializeObject<CloudDeployConfig>(json);
+
+                return config;
+            }
+            catch (Exception ex)
+            {
+                throw;
+                _logger.LogError(ex, "{Function} : {Message}", functionName, $"Unable to load config file '{FilePath}'");
+                return new CloudDeployConfig();
+            }
+        }
+
         private string GetApiKey()
         {
             if (_DeployConfig != null)
@@ -862,6 +438,162 @@
             }
             return remoteFileAccessUrl;
         }
+
+        private StatusMessage GetListOfFiles(out IEnumerable<FileInfo> FilesList)
+        {
+            var returnStatusMsg = new StatusMessage(true);
+            returnStatusMsg.ObjectName = "GetListOfFiles";
+
+            var filesList = new List<FileInfo>();
+
+            var dirMapped = _FileHelperService.GetMappedPath(DataPath());
+
+            try
+            {
+                var files = Directory.GetFiles(dirMapped).ToList();
+                foreach (var filepath in files)
+                {
+                    var filename = "";
+                    try
+                    {
+                        //filename = filepath.Replace(dirMapped, "");
+                        //   var fileInfo = ParseFilePath(filepath);
+                        var fileInfo = new FileInfo(filepath);
+                        filesList.Add(fileInfo);
+                        //filesList.Add(filename, GetTimestampFromFileName(filename));
+                    }
+                    catch (Exception e)
+                    {
+                        var fileMsg = new StatusMessage(false);
+                        fileMsg.ObjectName = "GetListOfFiles";
+                        returnStatusMsg.Message = $"Error processing file '{filename}'.";
+                        fileMsg.RelatedException = e;
+
+                        returnStatusMsg.InnerStatuses.Add(fileMsg);
+                    }
+                }
+            }
+            //catch (System.IO.DirectoryNotFoundException missingDirEx)
+            //{
+            //    //continue
+            //}
+            catch (Exception e)
+            {
+                returnStatusMsg.Success = false;
+                returnStatusMsg.Message = $"Error accessing files in '{dirMapped}'.";
+                returnStatusMsg.RelatedException = e;
+            }
+
+            if (filesList.Any())
+            {
+                returnStatusMsg.Success = true;
+                returnStatusMsg.Message = $"{filesList.Count} files found.";
+            }
+            else
+            {
+                if (returnStatusMsg.Message == "")
+                {
+                    returnStatusMsg.Success = false;
+                    returnStatusMsg.Message = $"No files found.";
+                }
+            }
+
+            FilesList = filesList;
+            return returnStatusMsg;
+        }
+
+        private StatusMessage ReadNodesDataFile(string FullFilePath, out NodesDataFile Data)
+        {
+            var msg = new StatusMessage(true);
+            msg.ObjectName = "ReadNodesDataFile";
+            var fullFilename = FullFilePath; //DataPath() + FileName; 
+
+            try
+            {
+                //Get saved data
+                var json = _FileHelperService.GetTextFileContents(fullFilename);
+                Data = JsonConvert.DeserializeObject<NodesDataFile>(json);
+
+                msg.Success = true;
+                msg.Message = $"Data read from '{fullFilename}'.";
+            }
+            catch (Exception e)
+            {
+                msg.Success = false;
+                msg.Message = $"Unable to read data from '{fullFilename}'.";
+                msg.RelatedException = e;
+                Data = new NodesDataFile();
+            }
+
+            msg.TimestampEnd = DateTime.Now;
+            return msg;
+        }
+
+        //private static FileInfo ParseFilePath(string FilePath)
+        //{
+        //    var pathData = new FileInfo(FilePath);
+
+        //    //Filename & Folder
+        //    //var pathDelim = FilePath.Contains("/") ? '/' : '\\';
+        //    //var splitFilePath = FilePath.Split(pathDelim).ToList();
+
+        //    //var filename = splitFilePath.Last();
+        //    //var pathData = new FileInfo(filename);
+
+        //    //var folderPath = FilePath.Replace(filename, "").Trim();
+        //    //if (folderPath != "") { pathData.DirectoryName = folderPath; }
+
+        //    if (filename.Contains("_"))
+        //    {
+        //        //Extension
+        //        var splitExt = filename.Split('.').ToList();
+        //        var ext = splitExt.Last();
+        //        pathData.Extension = ext;
+
+        //        var filenameStripped = filename.Replace("." + ext, "");
+        //        var splitFileName = filenameStripped.Split('_');
+
+        //        //Domain
+        //        pathData.Domain = splitFileName[0];
+
+        //        //Timestamp
+        //        var filenameDate = splitFileName[1];
+        //        var timestampVal = StringToTimestamp(filenameDate);
+        //        pathData.Timestamp = timestampVal;
+
+        //        //StartNode
+        //        var startNode = splitFileName[2] == "ALL" ? 0 : Convert.ToInt32(splitFileName[2]);
+        //        pathData.StartNode = startNode;
+
+        //    }
+        //    else
+        //    {
+        //        pathData = ParseArchiveFilename(FilePath);
+        //    }
+
+        //    return pathData;
+        //}
+
+
+        //private string GetFullFilename(string BaseFilename, string EnvironmentName)
+        //{
+        //    var filename = EnvironmentName + "_" + BaseFilename;
+        //    var ext = filename.EndsWith(".json") ? "" : ".json";
+        //    return filename + ext;
+        //}
+        //private static string BuildFilePath(string Filename)
+        //{
+        //    var fullFilename = DataPath() + Filename ;
+
+        //    return fullFilename;
+        //}
+
+        #endregion
+
+
+
+
+
 
 
         #endregion

@@ -2,7 +2,8 @@
 
 Tools to compare Content and Media across Umbraco Deploy environments created by [Heather Floyd](https://www.HeatherFloyd.com).
 
-Latest NuGet Package available @ [www.nuget.org/packages/Dragonfly.Umbraco9DeployTools/](https://www.nuget.org/packages/Dragonfly.Umbraco9DeployTools/)
+## Installation ##
+[![Nuget Downloads](https://buildstats.info/nuget/Dragonfly.Umbraco9DeployTools)](https://www.nuget.org/packages/Dragonfly.Umbraco9DeployTools/)
 
     PM > Install-Package Dragonfly.Umbraco9DeployTools
 
