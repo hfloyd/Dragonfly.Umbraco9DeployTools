@@ -59,7 +59,7 @@
 		<PackageReference Include="Dragonfly.Net5" Version="1.1.0">
 			<TreatAsUsed>true</TreatAsUsed>
 		</PackageReference>
-		<PackageReference Include="Dragonfly.Umbraco9" Version="1.0.7">
+		<PackageReference Include="Dragonfly.Umbraco9" Version="1.1.0">
 		<TreatAsUsed>true</TreatAsUsed>
 		</PackageReference>
 		<PackageReference Include="Umbraco.Cms.Web.Website" Version="9.3.0" PrivateAssets="All">
