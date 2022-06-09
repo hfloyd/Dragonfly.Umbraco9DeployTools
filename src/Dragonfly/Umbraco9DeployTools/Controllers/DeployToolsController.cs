@@ -13,6 +13,8 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
     using Microsoft.AspNetCore.Mvc.ViewFeatures;
     using Microsoft.Extensions.Logging;
     using Newtonsoft.Json;
+    using NPoco.Expressions;
+    using Umbraco.Cms.Core.Services;
     using Umbraco.Cms.Web.BackOffice.Controllers;
     using Umbraco.Cms.Web.Common.Attributes;
 
@@ -188,6 +190,13 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
 
         #region Views (returns HTML)
 
+        //  /umbraco/backoffice/Dragonfly/DeployTools
+        [HttpGet]
+        public IActionResult Index()
+        {
+            return Start();
+        }
+
         //  /umbraco/backoffice/Dragonfly/DeployTools/Start
         [HttpGet]
         public IActionResult Start()
@@ -196,16 +205,22 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
             var pvPath = RazorFilesPath() + "Start.cshtml";
 
             //GET DATA TO DISPLAY
+            var status = new StatusMessage(true);
             var model = _deployToolsService.GetAllDeployEnvironments();
             var localFilesInfo = new List<INodesDataFile>();
             var localFilesStatus = _deployToolsService.GetLocalFilesInfo(out localFilesInfo);
-       
+            status.InnerStatuses.Add(localFilesStatus);
+            var syncData = new SyncDateInfoFile();
+            var syncDataStatus = _deployToolsService.ReadSyncDateInfoFile(out syncData);
+            status.InnerStatuses.Add(syncDataStatus);
+
             //VIEW DATA 
             var viewData = new Dictionary<string, object>();
             viewData.Add("StandardInfo", GetStandardViewInfo());
-            viewData.Add("Status", localFilesStatus);
+            viewData.Add("Status", status);
             viewData.Add("LocalFilesInfo", localFilesInfo);
-   
+            viewData.Add("SyncData", syncData);
+
             //RENDER
             var htmlTask = _viewRenderService.RenderToStringAsync(this.HttpContext, pvPath, model, viewData);
             var displayHtml = htmlTask.Result;
@@ -223,10 +238,15 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
             return new HttpResponseMessageResult(result);
         }
 
-
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="EnvironmentType"></param>
+        /// <param name="UpdatedSince">Will be treated as UTC</param>
+        /// <returns></returns>
         //  /umbraco/backoffice/Dragonfly/DeployTools/CompareContent?EnvironmentType=live
         [HttpGet]
-        public IActionResult CompareContent(string EnvironmentType)
+        public IActionResult CompareContent(string EnvironmentType, DateTime UpdatedSince = default(DateTime))
         {
             //Setup
             var pvPath = RazorFilesPath() + "ContentCompare.cshtml";
@@ -240,11 +260,12 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
             var viewData = new Dictionary<string, object>();
             viewData.Add("StandardInfo", GetStandardViewInfo());
             viewData.Add("Status", compareStatus);
+            viewData.Add("UpdatedSince", UpdatedSince);
 
             //RENDER
             var htmlTask = _viewRenderService.RenderToStringAsync(this.HttpContext, pvPath, model, viewData);
             var displayHtml = htmlTask.Result;
-     
+
             //RETURN AS HTML
             var result = new HttpResponseMessage()
             {
@@ -258,17 +279,50 @@ namespace Dragonfly.Umbraco9DeployTools.Controllers
             return new HttpResponseMessageResult(result);
         }
 
-    #endregion
+        //  /umbraco/backoffice/Dragonfly/DeployTools/SetContentSyncDate?EnvironmentType=live
+        [HttpGet]
+        public IActionResult SetContentSyncDate(string EnvironmentType)
+        {
+            //Setup
+            var pvPath = RazorFilesPath() + "SyncDateStatus.cshtml";
 
-    internal StandardViewInfo GetStandardViewInfo()
-    {
-        var info = new StandardViewInfo();
+            //GET DATA TO DISPLAY
+            SyncDateInfoFile model = new SyncDateInfoFile();
+            var status = _deployToolsService.SetSyncDate(EnvironmentType, DeployToolsService.NodesType.Content, out model);
 
-        info.CurrentEnvironment = _deployToolsService.GetCurrentEnvironment();
-        info.CurrentToolVersion = DeployToolsPackage.Version;
+            //VIEW DATA 
+            var viewData = new Dictionary<string, object>();
+            viewData.Add("StandardInfo", GetStandardViewInfo());
+            viewData.Add("Status", status);
+            
+            //RENDER
+            var htmlTask = _viewRenderService.RenderToStringAsync(this.HttpContext, pvPath, model, viewData);
+            var displayHtml = htmlTask.Result;
 
-        return info;
-    }
+            //RETURN AS HTML
+            var result = new HttpResponseMessage()
+            {
+                Content = new StringContent(
+                    displayHtml,
+                    Encoding.UTF8,
+                    "text/html"
+                )
+            };
+
+            return new HttpResponseMessageResult(result);
+        }
+
+        #endregion
+
+        internal StandardViewInfo GetStandardViewInfo()
+        {
+            var info = new StandardViewInfo();
+
+            info.CurrentEnvironment = _deployToolsService.GetCurrentEnvironment();
+            info.CurrentToolVersion = DeployToolsPackage.Version;
+
+            return info;
+        }
 
     }
 

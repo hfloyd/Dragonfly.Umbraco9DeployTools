@@ -101,7 +101,7 @@
 
         #endregion
 
-        #region General INodeDataItem Fucntions
+        #region General INodeDataItem Functions
 
         private IEnumerable<LocalRemoteComparison> CompareINodeDataItems(INodeDataItem LocalNode, INodeDataItem RemoteNode)
         {
@@ -139,7 +139,11 @@
             compLastEditedByUser.PropertyName = "LastEditedByUser";
             compLastEditedByUser.LocalValue = LocalNode.LastEditedByUser;
             compLastEditedByUser.RemoteValue = RemoteNode.LastEditedByUser;
-            if (LocalNode.LastEditedByUser == "Administrator" || RemoteNode.LastEditedByUser == "Administrator")
+            if (LocalNode.LastEditedByUser == "Administrator" && RemoteNode.LastEditedByUser == "Administrator")
+            {
+                compLastEditedByUser.Result = ComparisonResult.Same;
+            }
+            else if (LocalNode.LastEditedByUser == "Administrator" || RemoteNode.LastEditedByUser == "Administrator")
             {
                 compLastEditedByUser.Result = ComparisonResult.DifferentIrrelevant;
             }
@@ -152,12 +156,25 @@
             comparisons.Add(compLastEditedByUser);
 
             var compParentNodeUdi = new LocalRemoteComparison();
+            var localParentNodeUdi = LocalNode.ParentNodeInfo != null ? LocalNode.ParentNodeInfo.NodeUdi : LocalNode.ParentNodeUdi;
+            var remoteParentNodeUdi = RemoteNode.ParentNodeInfo != null ? RemoteNode.ParentNodeInfo.NodeUdi : RemoteNode.ParentNodeUdi;
             compParentNodeUdi.PropertyName = "ParentNodeUdi";
-            compParentNodeUdi.LocalValue = LocalNode.ParentNodeInfo!=null ? LocalNode.ParentNodeInfo.NodeUdi: LocalNode.ParentNodeUdi;
-            compParentNodeUdi.RemoteValue = RemoteNode.ParentNodeInfo!=null ? RemoteNode.ParentNodeInfo.NodeUdi: RemoteNode.ParentNodeUdi;
-            compParentNodeUdi.Result = compParentNodeUdi.LocalValue == compParentNodeUdi.RemoteValue
-                ? ComparisonResult.Same
-                : ComparisonResult.Different;
+            compParentNodeUdi.LocalValue = localParentNodeUdi;
+            compParentNodeUdi.RemoteValue = remoteParentNodeUdi;
+            if (localParentNodeUdi == null && remoteParentNodeUdi == null)
+            {
+                compParentNodeUdi.Result = ComparisonResult.Same;
+            }
+            else if (localParentNodeUdi == null || remoteParentNodeUdi == null)
+            {
+                compParentNodeUdi.Result = ComparisonResult.Different;
+            }
+            else
+            {
+                compParentNodeUdi.Result = localParentNodeUdi.ToString() == remoteParentNodeUdi.ToString()
+                 ? ComparisonResult.Same
+                 : ComparisonResult.Different;
+            }
             comparisons.Add(compParentNodeUdi);
 
             var compOrderNum = new LocalRemoteComparison();
@@ -182,6 +199,135 @@
 
             return comparisons;
 
+        }
+
+        #endregion
+
+        #region SyncDate Info
+
+        private const string SYNCDATE_FILE_NAME = "SyncDateInfo";
+
+        public StatusMessage SetSyncDate(string EnvironmentType, NodesType Type, out SyncDateInfoFile SyncInfo)
+        {
+            var status = new StatusMessage(true);
+            status.RunningFunctionName = "SetSyncDate";
+
+            //Get remote data set
+            SyncDateInfoFile currentData = null;
+            var statusRead = ReadSyncDateInfoFile(out currentData);
+            status.InnerStatuses.Add(statusRead);
+
+            if (currentData == null)
+            {
+                //Unable to read file - likely doesn't exist
+                currentData = new SyncDateInfoFile();
+            }
+
+            var environment = LookupEnvironmentByType(EnvironmentType);
+            if (environment == null)
+            {
+                status.Success = false;
+                status.Message = $"No Deploy Workspace found to match type '{EnvironmentType}'.";
+                SyncInfo = currentData;
+                return status;
+            }
+
+            //TODO: Update existing data if exists
+            var existingMatchData =
+                currentData.Syncs.Where(n => n.RemoteEnvironment.Type == EnvironmentType && n.Type == Type).OrderByDescending(n => n.SyncDate);
+            if (existingMatchData.Any())
+            {
+                var firstMatch = existingMatchData.First();
+                var matchStatus = new StatusMessage(true);
+                matchStatus.RunningFunctionName = "SetSyncDate";
+                matchStatus.Message =
+                    $"Existing Sync Date for {Type.ToString()} on '{EnvironmentType}' found: {firstMatch.SyncDate.GetReadableUtcTimestamp(true)}. It will be updated.";
+                status.InnerStatuses.Add(matchStatus);
+
+                foreach (var info in existingMatchData)
+                {
+                    currentData.Syncs.Remove(info);
+                }
+
+            }
+
+            var newSync = new SyncDateInfo(environment, Type, DateTime.Now.ToUniversalTime());
+            currentData.Syncs.Add(newSync);
+            status.Message = $"Sync Date for {Type.ToString()} on '{EnvironmentType}' updated.";
+
+            //Save Results
+            var saveStatus = SaveSyncData(currentData);
+            status.InnerStatuses.Add(saveStatus);
+            if (saveStatus.Success)
+            {
+                status.Message = $"Sync Date for {Type.ToString()} on '{EnvironmentType}' updated successfully.";
+            }
+            else
+            {
+                status.Success = false;
+                status.Message = $"There was a problem updating Sync Date for {Type.ToString()} on '{EnvironmentType}'.";
+            }
+
+            SyncInfo = currentData;
+            return status;
+        }
+
+        private StatusMessage SaveSyncData(SyncDateInfoFile Data)
+        {
+            var status = new StatusMessage(true);
+            status.RunningFunctionName = "SaveSyncData";
+            status.Message = $"Running {status.RunningFunctionName}.";
+            //status.MessageDetails = $"There are {Data.ContentNodes.Count} Content nodes in the Data.";
+            //status.RelatedObject = Data;
+
+            var fullFilename = GeneralFilePath(SYNCDATE_FILE_NAME);
+
+            try
+            {
+                var json = JsonConvert.SerializeObject(Data);
+                status.InnerStatuses.Add(DoFileSave(fullFilename, json));
+            }
+            catch (Exception e)
+            {
+                status.Success = false;
+                status.Message = $"Unable to save Sync data to '{fullFilename}'.";
+                status.RelatedException = e;
+            }
+
+            status.TimestampEnd = DateTime.Now;
+            return status;
+        }
+
+        //public object GetAllSyncData()
+        //{
+        //    return null;
+        //}
+        public StatusMessage ReadSyncDateInfoFile(out SyncDateInfoFile Data)
+        {
+            var msg = new StatusMessage(true);
+            msg.RunningFunctionName = "ReadSyncDateInfoFile";
+
+            var fullFilename = GeneralFilePath(SYNCDATE_FILE_NAME);
+
+            try
+            {
+                //Get saved data
+                var json = _FileHelperService.GetTextFileContents(fullFilename);
+                Data = JsonConvert.DeserializeObject<SyncDateInfoFile>(json);
+
+                msg.Success = true;
+                msg.Message = $"Data read from '{fullFilename}'.";
+            }
+            catch (Exception e)
+            {
+                msg.Success = false;
+                msg.Message = $"Unable to read data from '{fullFilename}'.";
+                msg.RelatedException = e;
+                Data = null;
+            }
+
+            msg.TimestampEnd = DateTime.Now;
+            return msg;
         }
 
 
@@ -213,6 +359,21 @@
             else
             {
                 return DataPath() + filename + ext;
+            }
+        }
+
+        public string GeneralFilePath(string FileName, bool ReturnFilenameOnly = false)
+        {
+
+            var ext = FileName.EndsWith(".json") ? "" : ".json";
+
+            if (ReturnFilenameOnly)
+            {
+                return FileName + ext;
+            }
+            else
+            {
+                return DataPath() + FileName + ext;
             }
         }
 
@@ -301,7 +462,7 @@
         {
             DataList = new List<INodesDataFile>();
             var returnStatus = new StatusMessage(true);
-            returnStatus.ObjectName = "GetLocalFilesInfo";
+            returnStatus.RunningFunctionName = "GetLocalFilesInfo";
 
             IEnumerable<FileInfo> filesList;
             var statusGetListOfFiles = GetListOfFiles(out filesList);
@@ -311,16 +472,24 @@
             {
                 foreach (var fileInfo in filesList)
                 {
+                    var addStatus = true;
                     StatusMessage readStatus = new StatusMessage(true);
-                    readStatus.ObjectName = "GetLocalFilesInfo";
+                    readStatus.RunningFunctionName = "GetLocalFilesInfo";
                     try
                     {
                         //Read file
-                        NodesDataFile contents;
-                        readStatus = ReadNodesDataFile(fileInfo.FullName, out contents);
+                        NodesDataFile nodeFile;
+                        readStatus = ReadNodesDataFile(fileInfo.FullName, out nodeFile);
 
-                        var nodeFile = contents;
-                        DataList.Add(nodeFile);
+                        
+                        if (nodeFile.Environment != null)
+                        {
+                            DataList.Add(nodeFile);
+                        }
+                        else
+                        {
+                            addStatus = false;
+                        }
                     }
                     catch (Exception e)
                     {
@@ -328,7 +497,11 @@
                         readStatus.Message = $"GetLocalFilesInfo: Failure getting file '{fileInfo.FullName}'.";
                         readStatus.RelatedException = e;
                     }
-                    returnStatus.InnerStatuses.Add(readStatus);
+
+                    if (addStatus)
+                    {
+                        returnStatus.InnerStatuses.Add(readStatus);
+                    }
                 }
             }
 
@@ -592,11 +765,9 @@
 
 
 
-
-
-
-
         #endregion
+
+
 
     }
 }

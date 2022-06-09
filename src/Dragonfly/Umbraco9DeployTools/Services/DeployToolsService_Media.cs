@@ -3,33 +3,18 @@
     using System;
     using System.Collections;
     using System.Collections.Generic;
-    using System.Diagnostics.Eventing.Reader;
-    using System.Drawing;
-    using System.IO;
     using System.Linq;
     using System.Net;
-    using System.Net.Http;
-    using System.Text;
-    using System.Threading.Tasks;
     using Dragonfly.NetModels;
     using Dragonfly.Umbraco9DeployTools.Models;
-    using Dragonfly.UmbracoServices;
-    using Microsoft.AspNetCore.Http;
-    using Microsoft.Extensions.DependencyInjection;
     using Microsoft.Extensions.Logging;
     using Newtonsoft.Json;
-    using NPoco.Expressions;
     using Umbraco.Cms.Core;
-    using Umbraco.Cms.Core.Hosting;
     using Umbraco.Cms.Core.Models;
-    using Umbraco.Cms.Core.Services;
-    using Umbraco.Cms.Core.Models.PublishedContent;
-    using Umbraco.Cms.Web.Common;
     using Umbraco.Extensions;
 
     public partial class DeployToolsService
     {
-
         #region Media Nodes
 
         private const string MEDIA_FILE_NAME = "MediaNodesData";
@@ -95,13 +80,14 @@
             throw new NotImplementedException();
         }
 
-   
+
         private StatusMessage ReadMediaNodesDataFile(Workspace Environment, out MediaNodesDataFile Data)
         {
             var msg = new StatusMessage(true);
             msg.ObjectName = "ReadMediaNodesDataFile";
 
             var fullFilename = EnvironmentFilePath(NodesType.Media, Environment);
+
             try
             {
                 //Get saved data
@@ -249,7 +235,7 @@
                 _MediaResultsCounter += 1;
 
                 //Set basic node info
-                var result = GetBasicMediaNodeData(Media) as MediaNodeDataItem;
+                var result = new MediaNodeDataItem(GetBasicMediaNodeData(Media));
                 result.MediaTypeAlias = Media.ContentType.Alias;
                 result.FilePath = Media.HasProperty("umbracoFile") ? (Media.GetValue("umbracoFile") != null ? Media.GetValue("umbracoFile").ToString() : "MISSING") : "N/A";
                 result.UniversalSortInt = _MediaResultsCounter;
@@ -258,7 +244,7 @@
                 var parent = _services.MediaService.GetById(Media.ParentId);
                 if (parent != null)
                 {
-                    var parentInfo = GetBasicMediaNodeData(parent);
+                    var parentInfo =new NodeDataItem( GetBasicMediaNodeData(parent));
                     result.ParentNodeInfo = parentInfo;
                 }
 

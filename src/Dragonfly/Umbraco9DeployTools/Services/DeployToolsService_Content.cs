@@ -3,28 +3,14 @@
     using System;
     using System.Collections;
     using System.Collections.Generic;
-    using System.Diagnostics.Eventing.Reader;
-    using System.Drawing;
-    using System.IO;
     using System.Linq;
     using System.Net;
-    using System.Net.Http;
-    using System.Text;
-    using System.Threading.Tasks;
     using Dragonfly.NetModels;
     using Dragonfly.Umbraco9DeployTools.Models;
-    using Dragonfly.UmbracoServices;
-    using Microsoft.AspNetCore.Http;
-    using Microsoft.Extensions.DependencyInjection;
     using Microsoft.Extensions.Logging;
     using Newtonsoft.Json;
-    using NPoco.Expressions;
     using Umbraco.Cms.Core;
-    using Umbraco.Cms.Core.Hosting;
     using Umbraco.Cms.Core.Models;
-    using Umbraco.Cms.Core.Services;
-    using Umbraco.Cms.Core.Models.PublishedContent;
-    using Umbraco.Cms.Web.Common;
     using Umbraco.Extensions;
 
     public partial class DeployToolsService
@@ -36,7 +22,6 @@
         #region READ
         public ContentNodesDataFile AccessContentDataFile(string EnvironmentType)
         {
-
             var data = new ContentNodesDataFile();
             var environment = LookupEnvironmentByType(EnvironmentType);
             var readResult = ReadContentNodesDataFile(environment, out data);
@@ -47,7 +32,7 @@
         public StatusMessage FetchRemoteContentNodesData(string EnvironmentType, bool UpdateRemoteDataBeforeFetching = false)
         {
             var status = new StatusMessage(true);
-            status.ObjectName = "FetchRemoteContentNodesData";
+            status.RunningFunctionName = "FetchRemoteContentNodesData";
             var targetEnvironment = LookupEnvironmentByType(EnvironmentType);
 
             if (targetEnvironment == null)
@@ -179,7 +164,7 @@
         private StatusMessage ReadContentNodesDataFile(Workspace Environment, out ContentNodesDataFile Data)
         {
             var msg = new StatusMessage(true);
-            msg.ObjectName = "ReadContentNodesDataFile";
+            msg.RunningFunctionName = "ReadContentNodesDataFile";
 
             var fullFilename = EnvironmentFilePath(NodesType.Content, Environment);
 
@@ -338,13 +323,26 @@
                 result.UniversalSortInt = _ContentResultsCounter;
 
                 //Get Parent Node Info
-                var parent = _services.ContentService.GetById(Content.ParentId);
-                if (parent != null)
+                if (Content.ParentId == -1)
                 {
-                    var parentInfo = GetBasicContentNodeData(parent);
+                    //Root
+                    var parentInfo = new NodeDataItem();
+                    parentInfo.LevelNum = 0;
+                    parentInfo.OrderNum = 0;
+                    parentInfo.NodeId = Content.ParentId;
+                    parentInfo.NodeName = "[CONTENT ROOT]";
+
                     result.ParentNodeInfo = parentInfo;
                 }
-
+                else
+                {
+                    var parent = _services.ContentService.GetById(Content.ParentId);
+                if (parent != null)
+                {
+                    var parentInfo =new NodeDataItem(GetBasicContentNodeData(parent));
+                    result.ParentNodeInfo = parentInfo;
+                }
+}
                 _ContentResultsList.Add(result);
             }
         }

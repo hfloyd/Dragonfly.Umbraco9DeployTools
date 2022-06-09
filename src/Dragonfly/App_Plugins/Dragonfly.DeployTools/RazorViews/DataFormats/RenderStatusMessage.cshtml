@@ -14,7 +14,7 @@
 	{
 		var alertClass = Msg.Success ? "alert-success" : "alert-danger";
 		var objPrefix = !string.IsNullOrEmpty(Msg.ObjectName) ? $"{Msg.ObjectName}: " : "";
-		var title =objPrefix + (Msg.HasMessage ? Msg.Message : $"Status: {(Msg.Success ? "Success": "Failure")}");
+		var title =objPrefix + (Msg.HasMessage() ? Msg.Message : $"Status: {(Msg.Success ? "Success": "Failure")}");
 
 		<div class="alert @alertClass" style="margin-left: 50px;" role="alert">
 			<h4>@title</h4>

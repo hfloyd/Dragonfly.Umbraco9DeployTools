@@ -5,7 +5,8 @@
 # Project-specific files/folders
 build/
 *lnk
-
+*.bmpr
+*Temp.txt
 
 # Umbraco files
 

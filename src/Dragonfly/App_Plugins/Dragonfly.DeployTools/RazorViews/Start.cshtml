@@ -1,5 +1,6 @@
 @using Dragonfly.NetHelpers
 @using Dragonfly.NetModels
+@using Dragonfly.Umbraco9DeployTools
 @using Dragonfly.Umbraco9DeployTools.Models;
 @using Dragonfly.UmbracoHelpers
 @using Newtonsoft.Json
@@ -10,13 +11,17 @@
 	Expected View Data:
 	-------------------
 	StandardInfo (object - StandardViewInfo)		: Version, Current environment, etc.
-	LocalFilesInfo (object - List<INodesDataFile>)  : Info about all local files
 	Status (object - StatusMessage)					: Status of operations
+	LocalFilesInfo (object - List<INodesDataFile>)  : Info about all local files
+	SyncData (object - SyncDateInfoFile)			: Info about stored Sync data
 *@
 @{
 	var paramStandardInfo = Mvc.GetSafeViewData(ViewData, "StandardInfo", new StandardViewInfo()) as StandardViewInfo;
-	var paramLocalFilesInfo = Mvc.GetSafeViewData(ViewData, "LocalFilesInfo") as List<INodesDataFile>;
 	var paramStatus = Mvc.GetSafeViewData(ViewData, "Status", new StatusMessage()) as StatusMessage;
+	var paramLocalFilesInfo = Mvc.GetSafeViewData(ViewData, "LocalFilesInfo") as List<INodesDataFile>;
+	var paramSyncData = Mvc.GetSafeViewData(ViewData, "SyncData", new SyncDateInfoFile()) as SyncDateInfoFile;
+
+	//var updatedDate = DateTime.Now.AddDays(-1).ToUniversalTime();
 
 	//List of All workspaces - add current environment, if not in list (ex: Local)
 	var workspaces = new List<Workspace>();
@@ -30,7 +35,7 @@
 	{
 		{ "Fetch All Remote Nodes Data (Last run)", "/umbraco/backoffice/Dragonfly/DeployTools/FetchAllRemoteNodesData?UpdateRemoteFirst=false&EnvironmentType=" },
 		{ "Fetch All Remote Nodes Data (Most current)", "/umbraco/backoffice/Dragonfly/DeployTools/FetchAllRemoteNodesData?UpdateRemoteFirst=true&EnvironmentType=" },
-		{ "Compare Local to Remote", "/umbraco/backoffice/Dragonfly/DeployTools/CompareContent?EnvironmentType=" }
+		{ "Compare Local to Remote [Content]", "/umbraco/backoffice/Dragonfly/DeployTools/CompareContent?EnvironmentType=" },
 	};
 
 	var localActions = new Dictionary<string, string>()
@@ -41,7 +46,7 @@
 	};
 
 	var currEnvName = paramStandardInfo != null ? paramStandardInfo.CurrentEnvironment.Name : "Unknown";
-	var currVersion =paramStandardInfo != null ? paramStandardInfo.CurrentToolVersion.ToString(): "Unknown";
+	var currVersion = paramStandardInfo != null ? paramStandardInfo.CurrentToolVersion.ToString() : "Unknown";
 }
 
 <!DOCTYPE html>
@@ -49,6 +54,7 @@
 <head>
 	<link href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" />
 	<link href="https://cdnjs.cloudflare.com/ajax/libs/datatables/1.10.12/css/dataTables.bootstrap.min.css" rel="stylesheet" />
+	<link href="/App_Plugins/Dragonfly.DeployTools/styles.css" rel="stylesheet" />
 
 	@*<style>
 		{
@@ -106,38 +112,39 @@
 					@foreach (var env in workspaces)
 					{
 						var className = env.Type == paramStandardInfo.CurrentEnvironment.Type ? "active" : "";
-						
+
 						<th class="@className">@env.Name</th>
 					}
 				</tr>
 			</thead>
 			<tbody>
-			@foreach (var action in localActions)
-			{
-				<tr>
-					<td>@action.Key</td>
+				@foreach (var action in localActions)
+				{
+					<tr>
+						<td>@action.Key</td>
 
-					@foreach (var env in workspaces)
-					{
-						var className = env.Type == paramStandardInfo.CurrentEnvironment.Type ? "active" : "";
-						if (env.Type == paramStandardInfo.CurrentEnvironment.Type)
+						@foreach (var env in workspaces)
 						{
-							var actionUrl = $"{action.Value}";
+							var className = env.Type == paramStandardInfo.CurrentEnvironment.Type ? "active" : "";
+							if (env.Type == paramStandardInfo.CurrentEnvironment.Type)
+							{
+								var actionUrl = $"{action.Value}";
 
-							<td class="@className"><a href="@actionUrl" target="_blank" class="btn btn-info">Run</a></td>
+								<td class="@className"><a href="@actionUrl" target="_blank" class="btn btn-info">Run</a></td>
+							}
+							else
+							{
+								<td class="@className"><i>N/A</i></td>
+							}
 						}
-						else
-						{
-							<td class="@className"><i>N/A</i></td>
-						}
-					}
-				</tr>
-			}
+					</tr>
+				}
+
 				@foreach (var action in remoteActions)
 				{
 					<tr>
 						<td>@action.Key</td>
-						
+
 						@foreach (var env in workspaces)
 						{
 							var className = env.Type == paramStandardInfo.CurrentEnvironment.Type ? "active" : "";
@@ -154,6 +161,39 @@
 						}
 					</tr>
 				}
+				@if (paramSyncData.Syncs.Any())
+				{
+					foreach (var nodeType in paramSyncData.Syncs.Select(n => n.Type).Distinct().OrderBy(n => n))
+					{
+						<tr>
+							<td>Compare Local to Remote [@nodeType.ToString()] - Changed Since Last Sync Date</td>
+
+							@foreach (var env in workspaces)
+							{
+								var className = env.Type == paramStandardInfo.CurrentEnvironment.Type ? "active" : "";
+								if (env.Type != paramStandardInfo.CurrentEnvironment.Type)
+								{
+									var syncMatches = paramSyncData.Syncs.Where(n => n.Type == nodeType && n.RemoteEnvironment.Type == env.Type);
+									if (syncMatches.Any())
+									{
+										var syncDate = syncMatches.First().SyncDate;
+										var actionUrl = $"/umbraco/backoffice/Dragonfly/DeployTools/CompareContent?UpdatedSince={syncDate}&EnvironmentType={env.Type}";
+
+										<td class="@className"><a href="@actionUrl" target="_blank" class="btn btn-info">Run</a><br /><small>@syncDate.GetReadableUtcTimestamp(true)</small></td>
+									}
+									else
+									{
+										<td class="@className"><i>N/A</i></td>
+									}
+								}
+								else
+								{
+									<td class="@className"><i>N/A</i></td>
+								}
+							}
+						</tr>
+					}
+				}
 			</tbody>
 		</table>
 
@@ -166,11 +206,11 @@
 		{
 			<span>Unable to render Status : @e.Message</span>
 		}
-		
 
-	@*	<textarea rows="20" cols="200">
+
+		@*	<textarea rows="20" cols="200">
 			@JsonConvert.SerializeObject(paramStatus);
-		</textarea>*@
+			</textarea>*@
 
 	</div>
 
@@ -180,7 +220,7 @@
 
 	@{
 		RenderTableScripts("umbracodata_Files");
-		RenderTableScripts("umbracodata_Environments");
+		//RenderTableScripts("umbracodata_Environments");
 	}
 
 </body>
