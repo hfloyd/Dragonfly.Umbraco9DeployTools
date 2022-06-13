@@ -20,3 +20,7 @@ Certain versions have been compiled with a minimum required Umbraco CMS dependen
 
 
 
+## Usage ##
+
+Access while logged-in to the back-office at:
+http://MYSITE.COM/umbraco/backoffice/Dragonfly/DeployTools/Start
